@@ -19,7 +19,7 @@
 /*** defines ***/
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define AKVIM_VERSION "0.0.1"
-
+#define KILO_TAB_STOP 20
 
 
 enum editorKey {
@@ -36,6 +36,8 @@ enum editorKey {
 class erow{
 public:
     int size;
+    int rsize;
+    std::string render;
     std::string chars;
 };
 
@@ -142,12 +144,33 @@ int getWindowSize(int *rows, int *cols) {
 
 /*** row operations***/
 
+void editorUpdateRow(erow& row){
+    int tabs =0;
+    for(int j=0;j<row.chars.length();j++){
+        if(row.chars[j] == '\t') tabs++;
+    }
+    int idx = 0;
+    row.render.resize(row.chars.length() + tabs*(KILO_TAB_STOP-1) +1);
+    for(int i=0;i<row.chars.length();i++){
+        if (row.chars[i] == '\t'){
+            row.render[idx++] = ' ';
+            while(idx%KILO_TAB_STOP !=0) row.render[idx++] = ' ';
+        }
+        else{
+            row.render[idx++] = row.chars[i];
+        }
+    }
+    row.render.resize(idx);
+    row.rsize = idx;
+}
+
 void editorAppendRow(const std::string& s) {
     erow newRow;
     newRow.size = s.length();
     newRow.chars = s;
     E.row.push_back(newRow);
     E.numrows = E.row.size();
+    editorUpdateRow(E.row.back());
 }
 
 /*** file i/o***/
@@ -234,10 +257,10 @@ void editorDrawRows(abuf *ab){
             }
         }
         else{
-            int len = E.row[filerow].chars.length() - E.coloff;
+            int len = E.row[filerow].render.length() - E.coloff;
             if(len < 0) len=0;
             if(len > E.screencols) len = E.screencols;
-            ab->append(E.row[filerow].chars.c_str()+E.coloff,len);
+            ab->append(E.row[filerow].render.c_str()+E.coloff,len);
         }
         ab->append("\x1b[K", 3);
         if (y < E.screenrows - 1) {
