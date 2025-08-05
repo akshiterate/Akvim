@@ -27,7 +27,9 @@ enum editorKey {
   ARROW_DOWN,
   PAGE_UP,
   DEL_KEY,
-  PAGE_DOWN
+  PAGE_DOWN,
+  HOME_KEY,
+  END_KEY
 };// it seems the rest are set incrementally thats crazy
 
 /*** data ***/
@@ -106,9 +108,13 @@ int editorReadKey(){
 				if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
 				if (seq[2] == '~') {
 					switch (seq[1]) {
+						case '1': return HOME_KEY;
+            			case '4': return END_KEY;						
 						case '3': return DEL_KEY;
 						case '5': return PAGE_UP;
 						case '6': return PAGE_DOWN;
+						case '7': return HOME_KEY;
+						case '8': return END_KEY;
 					}
 				}
 			}
@@ -118,10 +124,18 @@ int editorReadKey(){
 					case 'B': return ARROW_DOWN;
 					case 'C': return ARROW_RIGHT;
 					case 'D': return ARROW_LEFT;
+					case 'H': return HOME_KEY;
+					case 'F': return END_KEY;
 				}
 			}
 
 
+		}
+		else if(seq[0] == '0'){
+			switch(seq[1]){
+				case 'H': return HOME_KEY;
+        		case 'F': return END_KEY;
+			}
 		}
 		return '\x1b';
 	}
@@ -278,9 +292,8 @@ void editorDrawRows(abuf *ab){
 			ab->append(E.row[filerow].render.c_str()+E.coloff,len);
 		}
 		ab->append("\x1b[K", 3);
-		if (y < E.screenrows - 1) {
-			ab->append("\r\n", 2);
-		}
+
+		ab->append("\r\n", 2);
 	}
 }
 void editorRefreshScreen(){
@@ -334,6 +347,10 @@ void editorMoveCursor(int key){
 			E.cx = 0;
 		}
 			break; 
+		
+//		case END_KEY:
+//			E.cx = row->size;
+//			break;
 	}
 	row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
 	int rowlen = row ? row->size : 0;
@@ -350,13 +367,25 @@ void editorProcessKeypress(){
 			write(STDOUT_FILENO, "\x1b[H", 3);
 			exit(0);
 			break;
+
+		case HOME_KEY:
+			E.cx = 0;
+			break;
+		case END_KEY:
+			if (E.cy < E.numrows)
+        		E.cx = E.row[E.cy].size;
+			break;
 		
 		case PAGE_UP:
 		case PAGE_DOWN:
 			{
-				int times = E.screenrows;
-				while(times--){
-					editorMoveCursor(c == PAGE_UP ? ARROW_UP: ARROW_DOWN);
+				if(c == PAGE_UP){
+					E.cy = E.rowoff - E.screencols +1;
+					if(E.cy < 0) E.cy = 0;
+				}
+				else if( c == PAGE_DOWN){
+					E.cy = E.rowoff + E.screencols -1;
+					if(E.cy > E.numrows) E.cy = E.numrows;
 				}
 			}
 			break;
@@ -380,6 +409,7 @@ void initEditor(){
 	E.rowoff = 0;   
 	E.coloff = 0;
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+	E.screenrows -= 1;
 }
 
 int main(int argc, char *argv[]) {
