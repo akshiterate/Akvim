@@ -15,6 +15,8 @@
 #include <sys/types.h>
 #include <fstream>
 #include <vector>
+#include <ctime>
+#include <cstdarg>
 
 /*** defines ***/
 #define CTRL_KEY(k) ((k) & 0x1f)
@@ -50,6 +52,9 @@ public:
 	int screenrows;
 	int screencols;
 	int numrows;
+	std::string filename;
+	std::string statusmsg;
+	time_t statusmsg_time;
 	std::vector<erow> row;
 
 	termios orig_termios;
@@ -199,6 +204,8 @@ void editorAppendRow(const std::string& s) {
 
 /*** file i/o***/
 void editorOpen(const std::string& filename){
+	E.filename = filename;
+
 	std::ifstream file(filename);
 	int linelen;
 	std::string line;
@@ -296,6 +303,48 @@ void editorDrawRows(abuf *ab){
 		ab->append("\r\n", 2);
 	}
 }
+
+void editorStatusBar(abuf *ab) {
+    ab->append("\x1b[7m", 4);
+
+    // Left status
+    std::string fname = E.filename.empty() ? "[No Name]" : E.filename;
+    std::ostringstream ossLeft;
+    ossLeft << fname.substr(0, 20) << " - " << E.numrows << " lines";
+    std::string status = ossLeft.str();
+
+    // Right status
+    std::ostringstream ossRight;
+    ossRight << (E.cy + 1);
+    std::string rstatus = ossRight.str();
+
+    if ((int)status.length() > E.screencols)
+        status = status.substr(0, E.screencols);
+
+    ab->append(status.c_str(), status.length());
+
+    int len = status.length();
+    while (len < E.screencols) {
+        if (E.screencols - len == (int)rstatus.length()) {
+            ab->append(rstatus.c_str(), rstatus.length());
+            break;
+        } else {
+            ab->append(" ", 1);
+            len++;
+        }
+    }
+    ab->append("\x1b[m", 3);
+	ab->append("\r\n",2);
+}
+
+void editorDrawMessageBar(abuf *ab) {
+	ab->append("\x1b[K", 3);
+	int msglen = E.statusmsg.length();
+	if (msglen > E.screencols) msglen = E.screencols;
+	if (msglen && time(NULL) - E.statusmsg_time < 5)
+	ab->append(E.statusmsg.c_str(), msglen);
+}
+
 void editorRefreshScreen(){
 	editorScroll();
 	abuf ab;
@@ -304,6 +353,9 @@ void editorRefreshScreen(){
 	ab.append("\x1b[H", 3);
 	
 	editorDrawRows(&ab);
+	editorStatusBar(&ab);
+	editorDrawMessageBar(&ab);
+
 	std::ostringstream oss;
 	oss<<"\x1b["<<(E.cy-E.rowoff)+1<<";"<<(E.rx-E.coloff)+1<<"H";
 	std::string buf = oss.str();
@@ -312,7 +364,18 @@ void editorRefreshScreen(){
 	ab.append("\x1b[?25h", 6);
 
 	write(STDOUT_FILENO, ab.b, ab.len);
-	// apparantly the destructor runs automatically somehow, although it was called in the c tutorial for this.
+	// apparantly the destructor runs automatically somehow, although it was called in the tutorial which was in c.
+}
+
+void editorSetStatusMessage(const char* fmt, ...) {
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    E.statusmsg = buf;
+    E.statusmsg_time = std::time(nullptr);
 }
 
 /*** input ***/
@@ -408,8 +471,9 @@ void initEditor(){
 	E.numrows = 0;
 	E.rowoff = 0;   
 	E.coloff = 0;
+	E.statusmsg_time=0;
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
-	E.screenrows -= 1;
+	E.screenrows -= 2;
 }
 
 int main(int argc, char *argv[]) {
@@ -419,7 +483,7 @@ int main(int argc, char *argv[]) {
 		editorOpen(argv[1]);
 
 	}
-
+	editorSetStatusMessage("HELP: Ctrl-Q = quit");
 	while (1){
 		editorRefreshScreen();
 		editorProcessKeypress();
