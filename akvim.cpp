@@ -23,6 +23,8 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define AKVIM_VERSION "0.0.1"
 #define AKVIM_TAB_STOP 8
+#define KILO_QUIT_TIMES 3;
+
 enum editorKey {
   BACKSPACE = 127,
   ARROW_LEFT = 1000,
@@ -198,14 +200,24 @@ void editorUpdateRow(erow& row){
 	row.rsize = idx;
 }
 
-void editorAppendRow(const std::string& s) {
+void editorInsertRow(int at, const std::string& s) {
+	if(at<0 || at> E.numrows)return;
+
+
 	erow newRow;
 	newRow.size = s.length();
 	newRow.chars = s;
-	E.row.push_back(newRow);
+	E.row.insert(E.row.begin() + at,newRow);
 	E.numrows = E.row.size();
-	editorUpdateRow(E.row.back());
-	
+	editorUpdateRow(E.row[at]);
+	E.dirty++;
+}
+
+void editorDelRow(int at){
+	if(at<0 || at>=E.numrows) return;
+	E.row.erase(E.row.begin()+at);
+	E.numrows = E.row.size();
+	E.dirty++;
 }
 
 void editorRowInsertChar(erow *row, int at, int c){
@@ -213,15 +225,69 @@ void editorRowInsertChar(erow *row, int at, int c){
 	row->chars.insert(row->chars.begin()+at,(char)c);
 	row->size = row->chars.size();
 	editorUpdateRow(*row);
+	E.dirty++;
+}
+
+void editorRowAppendString(erow *row,const std::string &s){
+	row->chars += s;
+	row->size = row->chars.size();
+	editorUpdateRow(*row);
+	E.dirty++;
+}
+
+void editorRowDelChar(erow *row,int at){
+	if(at<0 || at >= row->chars.size()) return;
+	row->chars.erase(at,1);
+	row->size = row->chars.size();
+	editorUpdateRow(*row);
+	E.dirty++;
 }
 
 /*** editor operations ***/
 void editorInsertChar(int c){
 	if(E.cy == E.numrows){
-		editorAppendRow("");
+		editorInsertRow(E.numrows,"");
 	}
 	editorRowInsertChar(&E.row[E.cy],E.cx,c);
 	E.cx++;
+}
+
+void editorInsertNewLine() {
+    if (E.cx == 0) {
+        editorInsertRow(E.cy, "");
+    } else if (E.cy < 0 || E.cy >= E.numrows) {
+        editorInsertRow(E.numrows, "");
+    } else {
+        // right side
+        std::string rightPart = E.row[E.cy].chars.substr(E.cx);
+        editorInsertRow(E.cy + 1, rightPart);
+		//left side
+        E.row[E.cy].chars.erase(E.cx);
+        E.row[E.cy].size = E.row[E.cy].chars.size();
+        editorUpdateRow(E.row[E.cy]);
+    }
+
+    E.cy++;
+    E.cx = 0;
+}
+
+
+
+void editorDelChar(){
+	if(E.cy == E.numrows) return;
+	if(E.cx == 0 && E.cy ==0) return;
+
+	erow *row = &E.row[E.cy];
+	if(E.cx >0){
+		editorRowDelChar(row,E.cx-1);
+		E.cx--;
+	}
+	else{
+		E.cx = E.row[E.cy-1].size;
+		editorRowAppendString(&E.row[E.cy-1],row->chars);
+		editorDelRow(E.cy);
+		E.cy--;
+	}
 }
 
 /*** file i/o***/
@@ -255,9 +321,9 @@ void editorOpen(const std::string& filename){
 			line.pop_back();
 			
 		}
-		editorAppendRow(line);
+		editorInsertRow(E.numrows,line);
 	}
-
+	E.dirty = 0;
 }
 
 void editorSave(){
@@ -270,6 +336,7 @@ void editorSave(){
 			if (write(fd, buf, len) == len) {
 				close(fd);
 				free(buf);
+				E.dirty = 0;
 				editorSetStatusMessage("%d bytes written to disk", len);	
 				return;
 			}
@@ -369,7 +436,7 @@ void editorStatusBar(abuf *ab) {
     // Left status
     std::string fname = E.filename.empty() ? "[No Name]" : E.filename;
     std::ostringstream ossLeft;
-    ossLeft << fname.substr(0, 20) << " - " << E.numrows << " lines";
+    ossLeft << fname.substr(0, 20) << " - " << E.numrows << " lines"<<(E.dirty ? "(modified)" : "");
     std::string status = ossLeft.str();
 
     // Right status
@@ -483,11 +550,20 @@ void editorMoveCursor(int key){
 }
 
 void editorProcessKeypress(){
+	static int quit_times = KILO_QUIT_TIMES;
+
 	int c = editorReadKey();
 	switch(c) {
 		case '\r':
+			editorInsertNewLine();
 			break;
 		case CTRL_KEY('q'):
+			if(E.dirty && quit_times>0){
+				std::string msg = "WARNING!!! FILE HAS UNSAVED CHANGEEESSSSSSS ""Press ctrl+q " + std::to_string(quit_times) + " times to quit";
+				editorSetStatusMessage(msg.c_str());
+				quit_times--;
+				return;
+			}
 			write(STDOUT_FILENO, "\x1b[2j",4); 
 			write(STDOUT_FILENO, "\x1b[H", 3);
 			exit(0);
@@ -508,6 +584,8 @@ void editorProcessKeypress(){
 		case BACKSPACE:
 		case CTRL_KEY('h'):
 		case DEL_KEY:
+			if(c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
+			editorDelChar();
 			break;
 		
 		case PAGE_UP:
@@ -539,6 +617,7 @@ void editorProcessKeypress(){
 			editorInsertChar(c);
 			break;
 	}
+	quit_times = KILO_QUIT_TIMES;
 }
 
 
@@ -550,7 +629,7 @@ void initEditor(){
 	E.numrows = 0;
 	E.rowoff = 0;   
 	E.coloff = 0;
-	E.dirty =0;
+	E.dirty =0;	
 	E.statusmsg_time=0;
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 	E.screenrows -= 2;
