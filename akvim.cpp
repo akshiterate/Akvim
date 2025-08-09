@@ -17,12 +17,14 @@
 #include <vector>
 #include <ctime>
 #include <cstdarg>
+#include <fcntl.h>
 
 /*** defines ***/
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define AKVIM_VERSION "0.0.1"
 #define AKVIM_TAB_STOP 8
 enum editorKey {
+  BACKSPACE = 127,
   ARROW_LEFT = 1000,
   ARROW_RIGHT,
   ARROW_UP,
@@ -33,6 +35,9 @@ enum editorKey {
   HOME_KEY,
   END_KEY
 };// it seems the rest are set incrementally thats crazy
+
+/*** prototypes ***/
+void editorSetStatusMessage(const char* fmt, ...);
 
 /*** data ***/
 class erow{
@@ -52,6 +57,7 @@ public:
 	int screenrows;
 	int screencols;
 	int numrows;
+	int dirty;
 	std::string filename;
 	std::string statusmsg;
 	time_t statusmsg_time;
@@ -88,8 +94,8 @@ void enableRawMode(){
 	raw.c_cflag &= ~(CS8);
 	raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
 
-	raw.c_cc[VMIN] = 0;
-	raw.c_cc[VTIME] = 1;
+	raw.c_cc[VMIN] = 1;
+	raw.c_cc[VTIME] = 0;
 	if(tcsetattr(STDIN_FILENO, TCSAFLUSH,&raw) == -1){
 		die("tcsetattr");
 	}
@@ -202,7 +208,42 @@ void editorAppendRow(const std::string& s) {
 	
 }
 
+void editorRowInsertChar(erow *row, int at, int c){
+	if(at <0 || at>(int)row->chars.size()) at = row->chars.size();
+	row->chars.insert(row->chars.begin()+at,(char)c);
+	row->size = row->chars.size();
+	editorUpdateRow(*row);
+}
+
+/*** editor operations ***/
+void editorInsertChar(int c){
+	if(E.cy == E.numrows){
+		editorAppendRow("");
+	}
+	editorRowInsertChar(&E.row[E.cy],E.cx,c);
+	E.cx++;
+}
+
 /*** file i/o***/
+char *editorRowsToString(int *buflen){
+	int totlen =0;
+	int j;
+	for(j=0;j<E.numrows;j++){
+		totlen+=E.row[j].size +1;
+	}
+	*buflen = totlen;
+
+	char *buf = (char*)malloc(totlen);
+	char *p = buf;
+	for (j=0;j<E.numrows;j++){
+		memcpy(p,E.row[j].chars.c_str(),E.row[j].size);
+		p += E.row[j].size;
+		*p = '\n';
+		p++;
+	}
+	return buf;
+}
+
 void editorOpen(const std::string& filename){
 	E.filename = filename;
 
@@ -219,7 +260,25 @@ void editorOpen(const std::string& filename){
 
 }
 
-
+void editorSave(){
+	if(E.filename.empty()) return;
+	int len;
+	char *buf = editorRowsToString(&len);
+	int fd = open(E.filename.c_str(),O_RDWR | O_CREAT,0644); //0644 standard permission for text files
+	if(fd == -1){
+		if(ftruncate(fd,len) == -1){
+			if (write(fd, buf, len) == len) {
+				close(fd);
+				free(buf);
+				editorSetStatusMessage("%d bytes written to disk", len);	
+				return;
+			}
+		}
+		close(fd);
+	}
+	free(buf);
+	editorSetStatusMessage("Oopsie Poopsie!! I/O error: %s", strerror(errno));
+}
 
 /*** append buffer ***/
 class abuf{
@@ -414,6 +473,7 @@ void editorMoveCursor(int key){
 //		case END_KEY:
 //			E.cx = row->size;
 //			break;
+
 	}
 	row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
 	int rowlen = row ? row->size : 0;
@@ -425,10 +485,16 @@ void editorMoveCursor(int key){
 void editorProcessKeypress(){
 	int c = editorReadKey();
 	switch(c) {
+		case '\r':
+			break;
 		case CTRL_KEY('q'):
 			write(STDOUT_FILENO, "\x1b[2j",4); 
 			write(STDOUT_FILENO, "\x1b[H", 3);
 			exit(0);
+			break;
+
+		case CTRL_KEY('s'):
+			editorSave();
 			break;
 
 		case HOME_KEY:
@@ -437,6 +503,11 @@ void editorProcessKeypress(){
 		case END_KEY:
 			if (E.cy < E.numrows)
         		E.cx = E.row[E.cy].size;
+			break;
+
+		case BACKSPACE:
+		case CTRL_KEY('h'):
+		case DEL_KEY:
 			break;
 		
 		case PAGE_UP:
@@ -459,6 +530,14 @@ void editorProcessKeypress(){
 		case ARROW_RIGHT:
 			editorMoveCursor(c);
 			break;
+		
+		case CTRL_KEY('l'):
+		case '\x1b':
+			break;
+		
+		default:
+			editorInsertChar(c);
+			break;
 	}
 }
 
@@ -471,6 +550,7 @@ void initEditor(){
 	E.numrows = 0;
 	E.rowoff = 0;   
 	E.coloff = 0;
+	E.dirty =0;
 	E.statusmsg_time=0;
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 	E.screenrows -= 2;
@@ -483,7 +563,7 @@ int main(int argc, char *argv[]) {
 		editorOpen(argv[1]);
 
 	}
-	editorSetStatusMessage("HELP: Ctrl-Q = quit");
+	editorSetStatusMessage("HELP:Ctrl-S = save || Ctrl-Q = quit");
 	while (1){
 		editorRefreshScreen();
 		editorProcessKeypress();
