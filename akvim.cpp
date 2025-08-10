@@ -40,6 +40,8 @@ enum editorKey {
 
 /*** prototypes ***/
 void editorSetStatusMessage(const char* fmt, ...);
+void editorRefreshScreen();
+std::string editorPrompt(const std::string& prompt);
 
 /*** data ***/
 class erow{
@@ -325,28 +327,37 @@ void editorOpen(const std::string& filename){
 	}
 	E.dirty = 0;
 }
+void editorSave() {
+    if (E.filename.empty()) {
+        E.filename = editorPrompt("(Esc to cancel) Save as: ");
+        if (E.filename.empty()) {
+            editorSetStatusMessage("Save aborted.");
+            return;
+        }
+    }
 
-void editorSave(){
-	if(E.filename.empty()) return;
-	int len;
-	char *buf = editorRowsToString(&len);
-	int fd = open(E.filename.c_str(),O_RDWR | O_CREAT,0644); //0644 standard permission for text files
-	if(fd == -1){
-		if(ftruncate(fd,len) == -1){
-			if (write(fd, buf, len) == len) {
-				close(fd);
-				free(buf);
-				E.dirty = 0;
-				editorSetStatusMessage("%d bytes written to disk", len);	
-				return;
-			}
-		}
-		close(fd);
-	}
-	free(buf);
-	editorSetStatusMessage("Oopsie Poopsie!! I/O error: %s", strerror(errno));
+    int len;
+    char *buf = editorRowsToString(&len);
+
+    int fd = open(E.filename.c_str(), O_RDWR | O_CREAT, 0644); 
+    if (fd == -1) {
+        free(buf);
+        editorSetStatusMessage("I/O error: %s", strerror(errno));
+        return;
+    }
+
+    if (ftruncate(fd, len) != -1 && write(fd, buf, len) == len) {
+        close(fd);
+        free(buf);
+        E.dirty = 0;
+        editorSetStatusMessage("%d bytes written to disk", len);	
+        return;
+    }
+
+    close(fd);
+    free(buf);
+    editorSetStatusMessage("I/O error: %s", strerror(errno));
 }
-
 /*** append buffer ***/
 class abuf{
 public:
@@ -505,6 +516,34 @@ void editorSetStatusMessage(const char* fmt, ...) {
 }
 
 /*** input ***/
+std::string editorPrompt(const std::string& prompt) {
+    std::string buf;
+
+    while (true) {
+        editorSetStatusMessage((prompt + buf).c_str());
+        editorRefreshScreen();
+
+        int c = editorReadKey();
+		if(c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE){
+			if(!buf.empty()) buf.pop_back();
+		}
+		else if(c == '\x1b'){
+			editorSetStatusMessage("");
+			return std::string();
+		}
+
+        else if (c == '\r') {
+            if (!buf.empty()) {
+                editorSetStatusMessage("");
+                return buf;
+            }
+        } 
+        else if (!std::iscntrl(c) && c < 128) {
+            buf.push_back(static_cast<char>(c));
+        }
+    }
+}
+
 void editorMoveCursor(int key){
 	erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
 	switch(key){
