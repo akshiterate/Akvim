@@ -11,11 +11,11 @@ A lightweight, minimal Vim-like text editor written in C++.
 
 You can either **download the prebuilt executable** from the [Releases page](https://github.com/YOUR_USERNAME/akvim/releases) or build from source.
 
-### Option 1: Download Prebuilt Binary (Recommended)
+### Download Prebuilt Binary
 
 ```bash
 # Download the binary
-wget https://github.com/YOUR_USERNAME/akvim/releases/download/v1.0/akvim
+wget https://github.com/YOUR_USERNAME/akvim/releases/download/v1.0/akvim or download it from Releases
 
 # Make it executable
 chmod +x akvim
