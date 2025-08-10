@@ -15,7 +15,7 @@ You can either **download the prebuilt executable** from the [Releases page](htt
 
 ```bash
 # Download the binary
-wget https://github.com/YOUR_USERNAME/akvim/releases/download/v1.0/akvim or download it from Releases
+wget https://github.com/YOUR_USERNAME/akvim/releases/download/v1.0/akvim
 
 # Make it executable
 chmod +x akvim
